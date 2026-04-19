@@ -185,7 +185,7 @@ void BindEventForWebView(scoped_refptr<BrowserData> browser_wrapper) {
                   args->get_NavigationId(&nav_id);
 
                   BOOL cancel_nav = weak_ptr->dispatcher->OnBeforeNavigation(
-                      url, user_gesture, is_redirect,
+                      nullptr, url, user_gesture, is_redirect,
                       WrapComString(headers.c_str()), nav_id);
 
                   args->put_Cancel(cancel_nav);
@@ -268,8 +268,8 @@ void BindEventForWebView(scoped_refptr<BrowserData> browser_wrapper) {
             weak_ptr->parent->PostEvent(base::BindOnce(
                 [](base::WeakPtr<BrowserData> weak_ptr, BOOL success,
                    COREWEBVIEW2_WEB_ERROR_STATUS status, uint64_t nav_id) {
-                  weak_ptr->dispatcher->OnNavigationComplete(success, status,
-                                                             nav_id);
+                  weak_ptr->dispatcher->OnNavigationComplete(nullptr, success,
+                                                             status, nav_id);
                 },
                 weak_ptr, success, status, nav_id));
 
@@ -488,6 +488,97 @@ void BindEventForWebView(scoped_refptr<BrowserData> browser_wrapper) {
                       wil::unique_cotaskmem_string raw_url = nullptr;
                       args->get_Uri(&raw_url);
                       weak_ptr->url = Utf8Conv::Utf16ToUtf8(raw_url.get());
+
+                      WRL::ComPtr<ICoreWebView2NavigationStartingEventArgs2>
+                          nav_args;
+                      args->QueryInterface<
+                          ICoreWebView2NavigationStartingEventArgs2>(&nav_args);
+
+                      // No-sync-support
+                      weak_ptr->browser->parent->PostUITask(base::BindOnce(
+                          [](base::WeakPtr<BrowserData> weak_ptr,
+                             base::WeakPtr<FrameData> frame_weak_ptr,
+                             WRL::ComPtr<
+                                 ICoreWebView2NavigationStartingEventArgs2>
+                                 args) {
+                            wil::unique_cotaskmem_string raw_url = nullptr;
+                            args->get_Uri(&raw_url);
+                            LPCSTR url = WrapComString(raw_url);
+
+                            BOOL user_gesture = FALSE, is_redirect = FALSE;
+                            args->get_IsUserInitiated(&user_gesture);
+                            args->get_IsRedirected(&is_redirect);
+
+                            std::wstring headers;
+                            WRL::ComPtr<ICoreWebView2HttpRequestHeaders>
+                                header_obj = nullptr;
+                            args->get_RequestHeaders(&header_obj);
+                            WRL::ComPtr<
+                                ICoreWebView2HttpHeadersCollectionIterator>
+                                iter = nullptr;
+                            header_obj->GetIterator(&iter);
+                            BOOL has_current = FALSE;
+                            while (SUCCEEDED(iter->get_HasCurrentHeader(
+                                       &has_current)) &&
+                                   has_current) {
+                              wil::unique_cotaskmem_string raw_key = nullptr,
+                                                           raw_value = nullptr;
+                              iter->GetCurrentHeader(&raw_key, &raw_value);
+
+                              headers.append(raw_key.get());
+                              headers.append(L": ");
+                              headers.append(raw_value.get());
+                              headers.append(L"\r\n");
+
+                              iter->MoveNext(nullptr);
+                            }
+
+                            uint64_t nav_id = 0;
+                            args->get_NavigationId(&nav_id);
+
+                            BOOL cancel_nav =
+                                weak_ptr->dispatcher->OnBeforeNavigation(
+                                    frame_weak_ptr.get(), url, user_gesture,
+                                    is_redirect, WrapComString(headers.c_str()),
+                                    nav_id);
+
+                            args->put_Cancel(cancel_nav);
+                          },
+                          weak_ptr->browser->weak_ptr_.GetWeakPtr(), weak_ptr,
+                          std::move(nav_args)));
+
+                      return S_OK;
+                    })
+                    .Get(),
+                nullptr);
+
+            frame_obj->add_NavigationCompleted(
+                WRL::Callback<
+                    ICoreWebView2FrameNavigationCompletedEventHandler>(
+                    [weak_ptr = frame->weak_ptr_.GetWeakPtr()](
+                        ICoreWebView2Frame* sender,
+                        ICoreWebView2NavigationCompletedEventArgs* args) {
+                      BOOL success = FALSE;
+                      args->get_IsSuccess(&success);
+
+                      COREWEBVIEW2_WEB_ERROR_STATUS status =
+                          COREWEBVIEW2_WEB_ERROR_STATUS();
+                      args->get_WebErrorStatus(&status);
+
+                      uint64_t nav_id = 0;
+                      args->get_NavigationId(&nav_id);
+
+                      weak_ptr->browser->parent->PostEvent(base::BindOnce(
+                          [](base::WeakPtr<BrowserData> weak_ptr,
+                             base::WeakPtr<FrameData> frame_weak_ptr,
+                             BOOL success, COREWEBVIEW2_WEB_ERROR_STATUS status,
+                             uint64_t nav_id) {
+                            weak_ptr->dispatcher->OnNavigationComplete(
+                                frame_weak_ptr.get(), success, status, nav_id);
+                          },
+                          weak_ptr->browser->weak_ptr_.GetWeakPtr(), weak_ptr,
+                          success, status, nav_id));
+
                       return S_OK;
                     })
                     .Get(),
@@ -878,6 +969,12 @@ void WINAPI GetBrowserSettings(BrowserData* obj, BrowserSettings* data) {
 
         WRL::ComPtr<ICoreWebView2Settings7> target = nullptr;
         sets->QueryInterface<ICoreWebView2Settings7>(&target);
+
+        WRL::ComPtr<ICoreWebView2Settings9> target9 = nullptr;
+        sets->QueryInterface<ICoreWebView2Settings9>(&target9);
+
+        if (target9)
+          target9->put_IsNonClientRegionSupportEnabled(TRUE);
 
         if (pset) {
           target->get_IsScriptEnabled(&pset->enableScripts);
@@ -1841,6 +1938,29 @@ void WINAPI NavigateToString(BrowserData* obj, LPCSTR string) {
       scoped_refptr(obj), std::string(string)));
 }
 
+void WINAPI NavigateWithRequest(BrowserData* obj,
+                                LPCSTR url,
+                                LPCSTR method,
+                                LPSTR postdata,
+                                uint32_t size,
+                                LPCSTR headers) {
+  obj->parent->PostUITask(base::BindOnce(
+      [](scoped_refptr<BrowserData> self, std::string url, std::string method,
+         std::string postdata, std::string headers) {
+        WRL::ComPtr<IStream> is =
+            SHCreateMemStream((BYTE*)postdata.data(), postdata.size());
+
+        WRL::ComPtr<ICoreWebView2WebResourceRequest> request = nullptr;
+        self->parent->core_env->CreateWebResourceRequest(
+            Utf8Conv::Utf8ToUtf16(url).c_str(),
+            Utf8Conv::Utf8ToUtf16(method).c_str(), is.Get(),
+            Utf8Conv::Utf8ToUtf16(headers).c_str(), &request);
+        self->core_webview->NavigateWithWebResourceRequest(request.Get());
+      },
+      scoped_refptr(obj), std::string(url), std::string(method),
+      std::string(postdata, size), std::string(headers)));
+}
+
 }  // namespace
 
 DWORD fnBrowserTable[] = {
@@ -1902,6 +2022,7 @@ DWORD fnBrowserTable[] = {
     (DWORD)GetProfileName,
     (DWORD)RemoveHOOKScript,
     (DWORD)NavigateToString,
+    (DWORD)NavigateWithRequest,
 };  // namespace edgeview
 
 namespace {

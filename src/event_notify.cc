@@ -9,7 +9,8 @@
 namespace edgeview {
 
 BrowserEventDispatcher::BrowserEventDispatcher(
-    base::WeakPtr<BrowserData> browser, LPVOID callback)
+    base::WeakPtr<BrowserData> browser,
+    LPVOID callback)
     : self(browser), ecallback(callback) {}
 
 BrowserEventDispatcher::~BrowserEventDispatcher() {}
@@ -159,7 +160,9 @@ void BrowserEventDispatcher::OnFullscreenModeChanged(BOOL fullscreen) {
   }
 }
 
-BOOL BrowserEventDispatcher::OnBeforeNavigation(LPCSTR url, BOOL user_gesture,
+BOOL BrowserEventDispatcher::OnBeforeNavigation(scoped_refptr<FrameData> frame,
+                                                LPCSTR url,
+                                                BOOL user_gesture,
                                                 BOOL is_redirect,
                                                 LPCSTR headers,
                                                 uint64_t nav_id) {
@@ -168,8 +171,12 @@ BOOL BrowserEventDispatcher::OnBeforeNavigation(LPCSTR url, BOOL user_gesture,
   if (ecallback) {
     LPVOID pClass = ecallback;
     browser->AddRef();
+    if (frame)
+      frame->AddRef();
     IMP_NEWECLASS(TempBrowser, browser.get(), eClass::m_pVfTable_Browser,
                   fnBrowserTable);
+    IMP_NEWECLASS(TempFrame, frame.get(), eClass::m_pVfTable_Frame,
+                  fnFrameTable);
     uint32_t nav_id_a = HIGH_32BIT(nav_id);
     uint32_t nav_id_b = LOW_32BIT(nav_id);
     __asm {
@@ -188,6 +195,7 @@ BOOL BrowserEventDispatcher::OnBeforeNavigation(LPCSTR url, BOOL user_gesture,
 			push user_gesture;
 			lea eax, url;
 			push eax;
+			push TempFrame;
 			push TempBrowser;
 			push ecx;
 			call[edx + 0x1C];
@@ -198,6 +206,8 @@ BOOL BrowserEventDispatcher::OnBeforeNavigation(LPCSTR url, BOOL user_gesture,
 			pop ecx;
     }
     browser->Release();
+    if (frame)
+      frame->Release();
   }
   return bRetVal;
 }
@@ -290,15 +300,21 @@ void BrowserEventDispatcher::OnHistoryChanged() {
   }
 }
 
-void BrowserEventDispatcher::OnNavigationComplete(BOOL success,
-                                                  int error_status,
-                                                  uint64_t nav_id) {
+void BrowserEventDispatcher::OnNavigationComplete(
+    scoped_refptr<FrameData> frame,
+    BOOL success,
+    int error_status,
+    uint64_t nav_id) {
   scoped_refptr<BrowserData> browser(self.get());
   if (ecallback) {
     LPVOID pClass = ecallback;
     browser->AddRef();
+    if (frame)
+      frame->AddRef();
     IMP_NEWECLASS(TempBrowser, browser.get(), eClass::m_pVfTable_Browser,
                   fnBrowserTable);
+    IMP_NEWECLASS(TempFrame, frame.get(), eClass::m_pVfTable_Frame,
+                  fnFrameTable);
     uint32_t nav_id_a = HIGH_32BIT(nav_id);
     uint32_t nav_id_b = LOW_32BIT(nav_id);
     __asm {
@@ -313,6 +329,7 @@ void BrowserEventDispatcher::OnNavigationComplete(BOOL success,
 			push nav_id_a;
 			push error_status;
 			push success;
+			push TempFrame;
 			push TempBrowser;
 			push ecx;
 			call[edx + 0x2C];
@@ -322,11 +339,16 @@ void BrowserEventDispatcher::OnNavigationComplete(BOOL success,
 			pop ecx;
     }
     browser->Release();
+    if (frame)
+      frame->Release();
   }
 }
 
 void BrowserEventDispatcher::OnScriptDialogRequested(
-    LPCSTR url, int kind, LPCSTR message, LPCSTR deftext,
+    LPCSTR url,
+    int kind,
+    LPCSTR message,
+    LPCSTR deftext,
     scoped_refptr<ScriptDialogDelegate> delegate) {
   scoped_refptr<BrowserData> browser(self.get());
   if (ecallback) {
@@ -435,7 +457,9 @@ void BrowserEventDispatcher::OnContextMenuExecute(
 }
 
 void BrowserEventDispatcher::OnPermissionRequested(
-    LPCSTR url, int kind, BOOL user_gesture,
+    LPCSTR url,
+    int kind,
+    BOOL user_gesture,
     scoped_refptr<PermissionDelegate> delegate) {
   scoped_refptr<BrowserData> browser(self.get());
   if (ecallback) {
@@ -628,7 +652,9 @@ void BrowserEventDispatcher::OnResourceReceiveResponse(json request_parameter) {
 }
 
 BOOL BrowserEventDispatcher::OnKeyEvent(
-    COREWEBVIEW2_KEY_EVENT_KIND kind, uint32_t virtual_key, int lparam,
+    COREWEBVIEW2_KEY_EVENT_KIND kind,
+    uint32_t virtual_key,
+    int lparam,
     COREWEBVIEW2_PHYSICAL_KEY_STATUS* status) {
   scoped_refptr<BrowserData> browser(self.get());
   BOOL bRetVal = FALSE;
@@ -667,7 +693,8 @@ BOOL BrowserEventDispatcher::OnKeyEvent(
 }
 
 void BrowserEventDispatcher::BasicAuthRequested(
-    LPCSTR url, LPCSTR challenge,
+    LPCSTR url,
+    LPCSTR challenge,
     scoped_refptr<BasicAuthenticationCallback> callback) {
   scoped_refptr<BrowserData> browser(self.get());
   if (ecallback) {
@@ -706,7 +733,9 @@ void BrowserEventDispatcher::BasicAuthRequested(
 }
 
 void BrowserEventDispatcher::OnReceivedWebMessage(
-    scoped_refptr<FrameData> frame, LPCSTR source_url, LPCSTR json_args) {
+    scoped_refptr<FrameData> frame,
+    LPCSTR source_url,
+    LPCSTR json_args) {
   scoped_refptr<BrowserData> browser(self.get());
   if (ecallback) {
     LPVOID pClass = ecallback;

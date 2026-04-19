@@ -31,28 +31,43 @@ class BrowserEventDispatcher : public base::RefCounted<BrowserEventDispatcher> {
   void OnNewWindowRequested(scoped_refptr<NewWindowDelegate> delegate);
   void OnDocumentTitleChanged(LPCSTR title);
   void OnFullscreenModeChanged(BOOL fullscreen);
-  BOOL OnBeforeNavigation(LPCSTR url, BOOL user_gesture, BOOL is_redirect,
-                          LPCSTR headers, uint64_t nav_id);
+  BOOL OnBeforeNavigation(scoped_refptr<FrameData> frame,
+                          LPCSTR url,
+                          BOOL user_gesture,
+                          BOOL is_redirect,
+                          LPCSTR headers,
+                          uint64_t nav_id);
   void OnContentLoading(BOOL error_page, uint64_t nav_id);
   void OnSourceChanged(BOOL new_document);
   void OnHistoryChanged();
-  void OnNavigationComplete(BOOL success, int error_status, uint64_t nav_id);
-  void OnScriptDialogRequested(LPCSTR url, int kind, LPCSTR message,
+  void OnNavigationComplete(scoped_refptr<FrameData> frame,
+                            BOOL success,
+                            int error_status,
+                            uint64_t nav_id);
+  void OnScriptDialogRequested(LPCSTR url,
+                               int kind,
+                               LPCSTR message,
                                LPCSTR deftext,
                                scoped_refptr<ScriptDialogDelegate> delegate);
   void OnContextMenuRequested(scoped_refptr<ContextMenuParams> params);
   void OnContextMenuExecute(scoped_refptr<ContextMenuItem> item);
-  void OnPermissionRequested(LPCSTR url, int kind, BOOL user_gesture,
+  void OnPermissionRequested(LPCSTR url,
+                             int kind,
+                             BOOL user_gesture,
                              scoped_refptr<PermissionDelegate> delegate);
 
   void OnResourceRequested(json request_parameter);
   void OnResourceReceiveResponse(json request_parameter);
 
-  BOOL OnKeyEvent(COREWEBVIEW2_KEY_EVENT_KIND kind, uint32_t virtual_key,
-                  int lparam, COREWEBVIEW2_PHYSICAL_KEY_STATUS* status);
-  void BasicAuthRequested(LPCSTR url, LPCSTR challenge,
+  BOOL OnKeyEvent(COREWEBVIEW2_KEY_EVENT_KIND kind,
+                  uint32_t virtual_key,
+                  int lparam,
+                  COREWEBVIEW2_PHYSICAL_KEY_STATUS* status);
+  void BasicAuthRequested(LPCSTR url,
+                          LPCSTR challenge,
                           scoped_refptr<BasicAuthenticationCallback> callback);
-  void OnReceivedWebMessage(scoped_refptr<FrameData> frame, LPCSTR source_url,
+  void OnReceivedWebMessage(scoped_refptr<FrameData> frame,
+                            LPCSTR source_url,
                             LPCSTR json_args);
 
   void OnFileChooserRequested(LPCSTR frame_id, BOOL multiselect, int node_id);
